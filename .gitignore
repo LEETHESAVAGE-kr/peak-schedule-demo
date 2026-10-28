@@ -1,0 +1,7 @@
+.streamlit/secrets.toml
+_secrets/
+*.key
+__pycache__/
+*.pyc
+p6/ops_log.csv
+_sched/_demo_last_gen.json
