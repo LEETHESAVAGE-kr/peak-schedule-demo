@@ -1,4 +1,4 @@
-# Streamlit Community Cloud entry point. Runs p6/viewer_ops_j9.py (copied unchanged except SHOW_MODE_B=False).
+# Streamlit Community Cloud entry point. Runs p6/viewer_mobile.py (phone view) or, with ?v=full, p6/viewer_ops_j9.py (SHOW_MODE_B=False).
 # The access code is read from st.secrets["demo_key"] (Cloud app settings -> Secrets). It is never stored in this repository.
 import os
 import pathlib
@@ -65,4 +65,6 @@ def _prep_demo_log():
 
 
 _prep_demo_log()
-runpy.run_path(str(P6 / "viewer_ops_j9.py"), run_name="__main__")
+# Phone-first operator view by default (QR); ?v=full opens the full presentation screen.
+VIEW = "viewer_ops_j9.py" if st.query_params.get("v") == "full" else "viewer_mobile.py"
+runpy.run_path(str(P6 / VIEW), run_name="__main__")
