@@ -181,8 +181,8 @@ def chart(index, lines, styles, move, ban_slots=(), scen=None, height=175):
 
 
 def move_html(mt):
-    rows = "".join(f"<tr><td>{r.시각}</td><td style='text-align:right'>{kw1(r['평균 이동전력(kW)'])}</td><td>{r['이동 방향']}</td></tr>" for _, r in mt.iterrows())
-    return f"<table class='k'><tr><th>시각</th><th>평균 이동전력(kW)</th><th>이동 방향</th></tr>{rows}</table>"
+    rows = "".join(f"<tr><td>{r.시각}</td><td style='text-align:right'>{kw1(r['평균 이동전력(kW)'])}</td><td>{r['이동 방향']}</td><td>{J9.FIELD_ACT.get(r['이동 방향'], '')}</td></tr>" for _, r in mt.iterrows())
+    return f"<table class='k'><tr><th>시각</th><th>평균 이동전력(kW)</th><th>이동 방향</th><th>현장 행동(확인 항목)</th></tr>{rows}</table>"
 
 
 def show_status_log(log, total):

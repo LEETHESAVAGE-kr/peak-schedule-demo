@@ -61,6 +61,7 @@ html, body, [class*="css"], .stApp {font-family:-apple-system,BlinkMacSystemFont
 .mv{display:flex;align-items:center;gap:10px;border:1px solid #ebebeb;border-radius:10px;padding:8px 12px;margin:6px 0;font-size:15px}
 .mv .t{font-weight:700;color:#222;min-width:108px} .mv .d{flex:1;color:#3f3f3f} .mv .w{font-weight:700;color:#222}
 .mv.out{border-left:5px solid #1E2761} .mv.in{border-left:5px solid #D98E1F}
+.mv{flex-wrap:wrap} .mv .a{flex-basis:100%;font-size:13px;color:#6a6a6a;margin-top:2px}
 .say{background:#f7f7f7;border-radius:12px;padding:12px 14px;font-size:15px;line-height:1.55;color:#222;margin:8px 0}
 .warnbox{background:#fff4e5;border-radius:12px;padding:10px 14px;font-size:14px;line-height:1.5;color:#7a4100;margin:8px 0}
 .note{display:inline-block;background:#fff4e5;color:#b25e09;border-radius:9999px;padding:2px 10px;font-size:12px;font-weight:600;margin:2px 0}
@@ -142,7 +143,7 @@ def move_list(mt):
     for _, r in mt.iterrows():
         d = J9.say_app(r["이동 방향"])
         cls = "out" if d.startswith("부하 줄임") else "in"
-        out.append(f"<div class='mv {cls}'><span class='t'>{r['시각']}</span><span class='d'>{d}</span><span class='w'>{kw1(r['평균 이동전력(kW)'])} kW</span></div>")
+        out.append(f"<div class='mv {cls}'><span class='t'>{r['시각']}</span><span class='d'>{d}</span><span class='w'>{kw1(r['평균 이동전력(kW)'])} kW</span><span class='a'>현장 행동(확인 항목): {J9.FIELD_ACT.get(r['이동 방향'], '')}</span></div>")
     st.markdown("".join(out) or "<div class='small'>옮길 작업이 없습니다. 기존 계획대로 운전합니다.</div>", unsafe_allow_html=True)
 
 

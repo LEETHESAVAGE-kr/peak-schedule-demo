@@ -166,3 +166,8 @@ def patch_display(O):
         f = getattr(O, name)
         setattr(O, name, (lambda f_: (lambda *a, **k: say_app(f_(*a, **k))))(f))
     O._j9_patched = True
+
+
+# ===== 10/29 Track K C5(K4): 작업 이동표 '현장 행동' 열 문구 — 전체 화면(viewer_ops_j9)·휴대폰 화면(viewer_mobile)이 같은 사전을 쓴다(표시만) =====
+# 발표 v6 8장 카드 ①과 같은 말. A사 설비별 계측이 없으므로 화면에서는 '확인 항목'으로 단다.
+FIELD_ACT = {"빼냄": "순서 밖 설비(압축기·집진 등) 잠시 멈춤 · 작업 묶음 끝 15분 뒤로", "받음": "미룬 설비·묶음 끝 작업을 여기서 돌림"}
