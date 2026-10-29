@@ -1,12 +1,14 @@
-# 실무자 모바일 화면 — 「피크 운전표」를 휴대폰에서 네 단계(① 점검 → ② 운전표 → ③ 반장 확인 → ④ 어제 결과)로만 쓴다.
+# 실무자 모바일 화면 — 「피크 운전표」를 휴대폰 한 페이지(위→아래: 운전표 자동 생성 → 반장 확인 → 접힘: 어제 채점·월말·멈춤 규칙 → 믿어도 되나 → 더 보기)로 쓴다.
+# 10/29 Track M: 단계 선택기·생성 버튼을 없애고 열자마자 운전표가 보이는 "써 보는 앱"으로(계산·숫자 변경 없음, 호출 위치만 옮김).
 # 10/28 사용자 지시: "너무 많은 내용을 보여 주려 한다 — 모바일에서는 실무자 관점에서만 명확하게 재조립".
-# 10/28 추가 지시: ①에 직접 넣은 고지서는 ②~④로 넘어가지 않는다는 안내(1) + 우리 공장 15분 전력으로 ②~④ 계산(2, 전체 화면 모드 B와 같은 함수).
+# 10/28 추가 지시: 직접 넣은 고지서는 운전표에 쓰이지 않는다는 안내(1) + 우리 공장 15분 전력으로 운전표·반장·채점(2, 전체 화면 모드 B와 같은 함수).
 # 디자인 규칙은 hazop-copilot DESIGN.md(흰 캔버스·잉크 글자·포인트 색 하나·큰 숫자는 화면당 하나·세부는 접기)를 따른다.
 # 계산은 전부 기존 함수(ops_service · ops_j9_view.compute · ops_g6_view 카드)를 부른다 — 이 파일에는 숫자 리터럴·새 계산이 없다(레이아웃 값 제외).
 # 발표 노트북 시연(viewer_ops_j9.py)은 그대로 두고, 배포 앱(Streamlit Cloud)의 기본 화면으로만 쓴다(deploy_streamlit/streamlit_app.py · ?v=full 이면 전체 화면).
 # 실행(로컬 확인): streamlit run viewer_mobile.py  → 주소 끝에 ?k=<접속 코드>
 import hashlib
 import hmac
+import html
 import os
 import pathlib
 
@@ -24,9 +26,8 @@ st.set_page_config(page_title="피크 운전표 실무자 화면", layout="cente
 KEY_FILE = pathlib.Path(os.environ.get("KAMP_DEMO_KEY_FILE", pathlib.Path(__file__).resolve().parent.parent / "_secrets" / "demo_key.txt"))
 NAVY, AMBER = "#1E2761", "#D98E1F"
 WD = "월화수목금토일"
-STEPS = ["① 점검", "② 운전표", "③ 반장", "④ 결과"]
 CONDS = O.CONDS
-SRC_A, SRC_U = "예시 공장 A사", "우리 공장 15분 전력"
+COUNT = pathlib.Path(__file__).parent / "tests" / "_count.txt"
 
 
 def key_ok():
@@ -68,7 +69,10 @@ html, body, [class*="css"], .stApp {font-family:-apple-system,BlinkMacSystemFont
 .small{font-size:13px;color:#6a6a6a;line-height:1.4}
 .chk{padding-left:20px;margin:6px 0 0 0} .chk li{margin:4px 0}
 .ok1{font-size:14px;color:#3f3f3f;margin:4px 0 10px 0} .ok1 b{color:#1E2761}
-div[data-testid=stSegmentedControl] button{flex:1}
+.card{border:1px solid #ddd;border-radius:12px;padding:12px 14px;margin:8px 0;font-size:15px;line-height:1.5}
+.bd{display:inline-block;background:#f2f2f2;color:#6a6a6a;border-radius:9999px;padding:2px 10px;font-size:12px;font-weight:600} .bd.rep{background:#f2f2f2}
+.cpt{font-size:13px;color:#6a6a6a} .bad{color:#c13515;font-weight:600}
+.hero .s.only{font-size:15px;color:#222}
 </style>""", unsafe_allow_html=True)
 
 
@@ -95,10 +99,33 @@ def head(when, q, hint=""):
     st.markdown(f"<div class='when'>{when}</div><div class='q'>{q}</div>" + (f"<div class='hint'>{hint}</div>" if hint else ""), unsafe_allow_html=True)
 
 
+INGEST_SAY = {   # 자동 입력 상태별 다음 행동(PRD Track L §6-2 표 그대로) — (톤, 문장, 운전표를 만드는가)
+    "폴더 없음": ("warn", "자동 입력 폴더가 없습니다 — 설정에서 로거 내보내기 폴더를 가리키십시오. 오늘은 운전표를 만들지 않습니다.", False),
+    "대기": ("ok", "18:00 마감 전입니다 — 마감 뒤 최신 파일을 읽습니다.", True),
+    "파일 없음": ("warn", "오늘 파일이 없습니다 — 로거 내보내기를 확인하십시오. 어제 파일로는 만들지 않습니다.", False),
+    "다름": ("bad", "자동 입력값이 엔진 입력과 다릅니다 — 운전표를 만들지 않고 담당자가 확인합니다.", False),
+    "예외": ("bad", "파일을 읽지 못했습니다 — 시각·kW 열 이름을 설정에서 고릅니다.", False),
+}
+
+
+def say_box(tone, text, sub=""):
+    if tone == "ok":
+        st.markdown(f"<div class='ok1'>{text}</div>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"<div class='hero {tone}'><div class='s only'>{text}</div>" + (f"<div class='small'>{sub}</div>" if sub else "") + "</div>",
+                    unsafe_allow_html=True)
+
+
 def mcard(col, label, value, badges="", note="", small=False):
-    """G6 카드(자동 입력·자동 채점)를 모바일 모양으로 받는다 — 같은 값. 자동 입력은 확인 한 줄, 자동 채점은 결과 카드."""
+    """G6 카드(자동 입력·자동 채점)를 모바일 모양으로 받는다 — 같은 값. 자동 입력은 상태별 한 줄, 자동 채점은 결과 카드."""
     if label.startswith("자동 입력"):
-        col.markdown(f"<div class='ok1'><b>✓ 전날 18:00 전력 자동 입력</b> · {value}</div>", unsafe_allow_html=True)
+        state = value if value in INGEST_SAY else ("다름" if "엔진 입력과 다름" in note else None)
+        if state is None:
+            col.markdown(f"<div class='ok1'><b>✓ 전날 18:00 전력 자동 입력</b> · {value}</div>", unsafe_allow_html=True)
+            return
+        tone, text, make = INGEST_SAY[state]
+        st.session_state["m_ingest_bad"] = not make
+        say_box(tone, text)
     else:
         col.markdown(f"<div class='hero ok'><div class='l'>{label}</div><div class='n' style='font-size:22px'>{value}</div>"
                      f"<div class='s'>다음 날 아침 실측 파일이 들어오면 자동 채점 · 사람 클릭 없음</div></div>", unsafe_allow_html=True)
@@ -108,27 +135,16 @@ def mtag(text, cls="add"):
     return f"<span class='note'>{text}</span>"
 
 
-def goto(step):
-    st.session_state["m_step"] = step
-
-
-def next_btn(step, label):
-    st.button(label, on_click=goto, args=(step,), width="stretch", key=f"next_{step}")
-
-
-def src():
-    return st.session_state.get("m_src_v", SRC_A)
-
-
 def keep(name, value):
-    """다른 단계에 다녀오면 지워지는 위젯 값을 따로 들고 있는다(다음에 그 값으로 다시 그린다)."""
+    """위젯 값을 따로 들고 있는다(접힘 안 위젯을 다음에 그 값으로 다시 그린다)."""
     st.session_state[name] = value
     return value
 
 
 def day_and_mode():
-    day = pd.Timestamp(st.session_state.get("m_day_v", O.DEMO_DAY))
-    cond = st.session_state.get("m_cond_v", CONDS[0])
+    """설정 위젯(맨 아래 '날짜·조건 바꾸기')의 값 — 위젯보다 위에서 읽으므로 위젯 키를 직접 본다."""
+    day = pd.Timestamp(st.session_state.get("m_day", O.DEMO_DAY))
+    cond = st.session_state.get("m_cond", CONDS[0])
     return day, (O.MODE_WIN if cond == CONDS[0] else O.MODE_FREE)
 
 
@@ -157,37 +173,25 @@ def day_chart(index, base, plan, names=("기존 운전", "운전표")):
     st.altair_chart(c.properties(height=200).configure_view(strokeWidth=0), width="stretch")
 
 
-def a_notice(full=True):
-    """안내(사용자 지시 1): ②~④의 A사 화면은 ①에 넣은 고지서와 별개다."""
+def a_notice():
+    """안내(사용자 지시 1): 위 운전표는 예시 공장 A사 화면이고, 고지서 숫자는 운전표에 쓰이지 않는다."""
     own = st.session_state.get("m_own_bill")
-    if full:
-        st.markdown("<div class='warnbox'><b>여기부터는 예시 공장 A사(2021년)의 15분 전력으로 만든 화면입니다.</b> "
-                    + ("①에 직접 넣은 고지서 숫자는 운전표에 쓰이지 않습니다 — " if own else "①의 고지서 숫자는 운전표에 쓰이지 않습니다 — ")
-                    + "고지서에는 15분 전력이 없기 때문입니다. 우리 공장 운전표는 위에서 <b>우리 공장 15분 전력</b>을 고르고 "
-                      "파워플래너 '시간대별' 화면에서 받은 CSV를 올리면 만들 수 있습니다.</div>", unsafe_allow_html=True)
-    else:
-        st.markdown("<div class='small'>예시 공장 A사 화면입니다. 우리 공장은 ②에서 '우리 공장 15분 전력'을 고르십시오.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='small'>" + ("직접 넣은 고지서 숫자는 운전표에 쓰이지 않습니다" if own else "고지서 숫자는 운전표에 쓰이지 않습니다")
+                + " — 고지서에는 15분 전력이 없기 때문입니다. 위 운전표는 예시 공장 A사(2021년)의 15분 전력으로 만들었습니다. "
+                  "우리 공장은 <b>우리 공장 15분 전력</b>(한전 파워플래너 '시간대별' 화면에서 받은 CSV)을 올리면 만들 수 있습니다.</div>",
+                unsafe_allow_html=True)
 
 
-# ---------- 머리 ----------
-st.markdown("<div class='brand'>피크 운전표</div><div class='lede'>생산량은 그대로 두고, 전기 기본요금을 정하는 피크 15분만 낮추도록 "
-            "작업 시각을 옮기는 하루 운전표입니다.</div>", unsafe_allow_html=True)
-st.markdown("<span class='note'>" + ("예시 공장 A사 · 2021년 저장 데이터로 다시 계산" if src() == SRC_A else "우리 공장 자료 · 지금 계산 · 발표 숫자 아님") + "</span>",
-            unsafe_allow_html=True)
-st.session_state.setdefault("m_step", STEPS[0])
-step = st.segmented_control("단계", STEPS, key="m_step", label_visibility="collapsed") or STEPS[0]
-
-
-# ===================================================================== ① 점검
+# ===================================================================== 고지서 점검(도입 전 한 번)
 def step1():
-    head("1 / 4 · 도입 전 한 번 · 약 30분", "우리 공장에 운전표가 맞을까?",
+    head("도입 전 한 번 · 약 30분", "우리 공장에 운전표가 맞을까?",
          "전기요금 고지서 숫자 다섯 개로 먼저 거릅니다. 맞지 않는 공장은 여기서 대신 할 일을 받습니다.")
     cases = pd.read_csv(J9.CASES, encoding="utf-8-sig")
     names = {c: J9.CASE_NAME.get(str(c).split()[0], c) for c in cases["케이스"]}
     opts = list(cases["케이스"]) + ["직접 입력"]
     pick = st.selectbox("고지서", opts, key="m_case", index=opts.index(st.session_state.get("m_case_v", opts[0])), format_func=lambda c: names.get(c, c))
     keep("m_case_v", pick); keep("m_own_bill", pick == "직접 입력")
-    if pick != "직접 입력" and (st.session_state.get("m_loaded") != pick or "m_txt" not in st.session_state):   # 다른 단계에 다녀오면 입력칸 상태가 지워진다
+    if pick != "직접 입력" and (st.session_state.get("m_loaded") != pick or "m_txt" not in st.session_state):
         ci = J9.case_inputs(cases[cases["케이스"] == pick].iloc[0])
         st.session_state.update(m_c=ci["계약전력"], m_p=ci["요금적용전력"], m_txt=J9.months_to_text(ci["월"], 1), m_exact=ci["월"], m_loaded=pick,
                                 m_plan=next((p for p in J9.PLANS if p.split()[-1] == ci["요금제"].split()[-1] and p[0] == ci["요금제"][0]), J9.PLANS[0]))
@@ -228,59 +232,11 @@ def step1():
         st.markdown(f"<div class='small'>요금 계산은 한전 기본공급약관 단가(2023-11-09판), 점검 기준은 외부 공장 31곳 고지서 분석에서 만들었습니다. "
                     f"{J9.FIXED_BOTTOM}</div>", unsafe_allow_html=True)
     if key == "통과":
-        st.markdown("<div class='small'>운전표는 고지서가 아니라 15분 전력으로 만듭니다. ②에서 예시 공장 또는 우리 공장 15분 전력을 고릅니다.</div>",
+        st.markdown("<div class='small'>운전표는 고지서가 아니라 15분 전력으로 만듭니다. 위 운전표는 예시 공장 A사, 우리 공장은 아래 '우리 공장 15분 전력으로 운전표 만들기'에서 만듭니다.</div>",
                     unsafe_allow_html=True)
-        next_btn(STEPS[1], "다음: ② 내일 운전표 만들기 →")
 
 
-# ===================================================================== ② 운전표
-def pick_source():
-    opts = [SRC_A, SRC_U]
-    st.segmented_control("어느 공장 자료로", opts, default=src(), key="m_src_w",
-                         on_change=lambda: st.session_state.update(m_src_v=st.session_state.get("m_src_w") or SRC_A))
-
-
-def step2():
-    head("2 / 4 · 매일 전날 18:00", "내일 어떤 작업을 몇 시로 옮길까?",
-         "전날 18시까지의 15분 전력으로 내일 운전표를 만듭니다. 사람이 있는 시간 안에서만 옮깁니다.")
-    pick_source()
-    if src() == SRC_U:
-        step2_user(); return
-    a_notice()
-    day, m = day_and_mode()
-    G6.ingest_card(st, day, mcard, mtag)
-    gen = st.session_state.get("gen")
-    gen = gen if gen is not None and gen["day"] == day else None
-    if st.button("내일 운전표 만들기", type="primary", width="stretch", key="m_gen"):
-        with st.spinner("운전표 계산 중 — 몇 초 걸립니다"):
-            gen = O.regenerate(day)
-        st.session_state["gen"] = gen
-        O.save_last_gen(gen)
-    if gen is None:
-        st.markdown(f"<div class='small'>대상 날짜 {fday(day)} · 조건 {J9.say_app(CONDS[0] if m == O.MODE_WIN else CONDS[1])}</div>", unsafe_allow_html=True)
-        return
-    y, o, cmp = gen["measured"], gen["plans"][m], gen["compare"][m]
-    hero(f"{fday(day)} 하루 최대 전력", f"{y.max():.0f} → {kw1(o.max())}<span class=u> kW</span>",
-         f"운전표대로 옮겼을 때 {kw1(o.max() - y.max())} kW · 실제 그날 전력으로 사후 평가")
-    st.markdown("**옮길 작업** — 남색 줄은 부하 줄임, 주황 줄은 그 부하를 배치하는 시간", unsafe_allow_html=True)
-    move_list(O.move_table(gen["index"], O.base_of(gen), o))
-    text, _ = O.briefing(gen, m)
-    with st.expander("작업 지시 문장(종이에 그대로 들어감)"):
-        st.markdown(f"<div class='say'>{J9.say_app(text)}</div>", unsafe_allow_html=True)
-    with st.expander("하루 전력 그래프"):
-        day_chart(gen["index"], y, o)
-    with st.expander("계산이 맞는지 확인"):
-        rows([("저장해 둔 운전표와 대조", "일치" if cmp["ok"] else "불일치"),
-              ("15분 구간별 최대 차이", f"{cmp['maxdiff']:.3f} kW"),
-              ("계산 시간", f"{gen['total_sec']:.1f}초")])
-    with st.expander("설정 — 날짜·조건", expanded=False):
-        days = list(O.TEST_DAYS)
-        keep("m_day_v", st.selectbox("날짜(2021-09 테스트 기간)", days, key="m_day", index=days.index(day), format_func=fday))
-        keep("m_cond_v", st.radio("조건", CONDS, key="m_cond", index=CONDS.index(st.session_state.get("m_cond_v", CONDS[0])), format_func=J9.say_app))
-    next_btn(STEPS[2], "다음: ③ 반장 확인 →")
-
-
-# ---------- ② 우리 공장(전체 화면 모드 B와 같은 함수: read_user_csv · reject_if_asa · precheck_user · gate_of · plan_user) ----------
+# ---------- 우리 공장(전체 화면 모드 B와 같은 함수: read_user_csv · reject_if_asa · precheck_user · gate_of · plan_user) ----------
 @st.cache_data(show_spinner=False)
 def cached_precheck(kw, month):
     return O.precheck_user(kw, month=month)
@@ -324,14 +280,14 @@ def user_form(kw):
     with st.expander("우리 공장 조건 — 날짜·근무 시간·이동 폭"):
         dv = st.session_state.get("m_bday_v")
         day = keep("m_bday_v", st.selectbox("운전표 날짜", cand, index=cand.index(dv) if dv in cand else 0, key="m_bday",
-                                            format_func=lambda d: fday(d) + (" — 자료 다음 날(계획만)" if d not in D else " — 실측 있음(④에서 채점)")))
+                                            format_func=lambda d: fday(d) + (" — 자료 다음 날(계획만)" if d not in D else " — 실측 있음(아래에서 채점)")))
         c1, c2 = st.columns(2)
         lo = keep("m_lo_v", c1.selectbox("사람이 있는 시작 시각", hours, index=st.session_state.get("m_lo_v", f["win_lo"]), key="m_lo"))
         hi = keep("m_hi_v", c2.selectbox("끝 시각", hours, index=st.session_state.get("m_hi_v", f["win_hi"]), key="m_hi"))
         Ls = [2, 3, 4]
         L = keep("m_L_v", st.selectbox("작업을 옮기는 폭(±시간)", Ls, index=Ls.index(st.session_state.get("m_L_v", f["L_hours"])), key="m_L"))
         st.markdown(f"<div class='small'>옮길 수 있는 부하 비중은 추정값 {pct(f['s'], 2)}(단조공장 2곳 전력 패턴)을 씁니다 — 로거로 3주 재면 바꿉니다. "
-                    "금형 교체·예열처럼 못 옮기는 작업은 ③에서 반장이 지웁니다.</div>", unsafe_allow_html=True)
+                    "금형 교체·예열처럼 못 옮기는 작업은 아래 반장 확인에서 지웁니다.</div>", unsafe_allow_html=True)
     return pd.Timestamp(day), dict(f, win_lo=int(lo), win_hi=int(hi), L_hours=int(L))
 
 
@@ -362,7 +318,7 @@ def step2_user():
         return
     base, exp = gen["base"], gen["plans"][O.MODE_WIN]
     hero(f"{fday(day)} 예상 최대 전력", f"{kw1(base.max())} → {kw1(exp.max())}<span class=u> kW</span>",
-         f"비슷한 과거 날 {len(gen['scen_days'])}일 평균 기준 예상(참고) · 실제 결과는 ④에서 채점" + (" · <b>모의 운전만(적용 금지)</b>" if gen["_mock"] else ""),
+         f"비슷한 과거 날 {len(gen['scen_days'])}일 평균 기준 예상(참고) · 실제 결과는 아래에서 채점" + (" · <b>모의 운전만(적용 금지)</b>" if gen["_mock"] else ""),
          "warn" if gen["_mock"] else "ok")
     st.markdown("**옮길 작업** — 남색 줄은 부하 줄임, 주황 줄은 그 부하를 배치하는 시간", unsafe_allow_html=True)
     move_list(O.move_table(gen["index"], base, exp))
@@ -371,30 +327,11 @@ def step2_user():
         st.markdown(f"<div class='say'>{J9.say_app(text)}</div>", unsafe_allow_html=True)
     with st.expander("하루 전력 그래프(예상)"):
         day_chart(gen["index"], base, exp, names=("운전표 없음(예상)", "운전표 적용(예상)"))
-    next_btn(STEPS[2], "다음: ③ 반장 확인 →")
 
 
-# ===================================================================== ③ 반장
-def active():
-    """지금 보는 운전표 — (gen, mode, site, window, 기준선 이름). 없으면 gen=None."""
-    if src() == SRC_U:
-        g = st.session_state.get("gen_b")
-        return g, O.MODE_WIN, O.SITE_USER, ((g["_form"]["win_lo"], g["_form"]["win_hi"]) if g else (7, 20)), "운전표 없음 예상"
-    day, m = day_and_mode()
-    g = st.session_state.get("gen")
-    return (g if g is not None and g["day"] == day else None), m, O.SITE_ASA, (7, 20), "기존"
-
-
-def step3():
-    head("3 / 4 · 매일 18:10 · 교대 반장", "못 옮기는 작업이 있나?",
-         "금형 교체·예열처럼 옮길 수 없는 작업을 체크하면 피크를 바로 다시 계산합니다. 확인이 끝나면 종이 한 장으로 운전원에게 넘깁니다.")
-    gen, m, site, window, base_name = active()
-    if src() == SRC_A:
-        a_notice(full=False)
-    if gen is None:
-        st.info("먼저 ② 에서 내일 운전표를 만드십시오.")
-        next_btn(STEPS[1], "② 운전표로 가기")
-        return
+# ===================================================================== 반장 확인(A사·우리 공장 공용)
+def foreman(gen, m, site, window, base_name):
+    """이동 불가 체크 → 피크 다시 계산(lock_rows) → 세 숫자 → 종이. 체크 키 규칙은 현행 ③ 그대로."""
     day = gen["day"]
     y0, o0 = O.base_of(gen), gen["plans"][m]
     mt = O.move_table(gen["index"], y0, o0)
@@ -408,17 +345,14 @@ def step3():
         hero("반장 수정 후 예상 피크", f"{kw1(lk['peak'])}<span class=u> kW</span>",
              f"수정 전 {kw1(o0.max())} kW · {base_name} {kw1(y0.max())} kW · 하루 전력량 합 {gap}", "warn" if lk["peak"] > o0.max() else "ok")
         gen = {**gen, "plans": {**gen["plans"], m: lk["plan"]}}
-    else:
-        hero("예상 피크(수정 없음)", f"{kw1(o0.max())}<span class=u> kW</span>", f"{base_name} {kw1(y0.max())} kW")
     st.markdown("<div class='say'><b>반장이 보는 세 숫자</b> — 하나라도 틀리면 그날은 원래 계획으로<ul class='chk'>"
                 "<li>설비별 오늘 가동 구간 수 = 계획</li><li>일 생산 수량 ≥ 생산계획 수량</li><li>하루 전력량 합은 그대로</li></ul></div>", unsafe_allow_html=True)
     extra = [f"이동 불가(반장 삭제) — {t}" for t in locked]
     st.download_button("운전원에게 줄 종이 내려받기(인쇄용)", data=O.paper_html(gen, m, extra_bans=extra, window=window, site=site).encode("utf-8"),
-                       file_name=f"운전표_{day:%Y%m%d}.html", mime="text/html", width="stretch")
-    next_btn(STEPS[3], "다음: ④ 다음 날 결과 →")
+                       file_name=f"운전표_{day:%Y%m%d}.html", mime="text/html", width="stretch", key=f"m_paper_{tag}")
 
 
-# ===================================================================== ④ 결과
+# ===================================================================== 어제 결과·멈춤 규칙
 def stop_rules():
     with st.expander("언제 멈추나 — 멈춤 규칙 네 가지"):
         st.markdown("<ul class='chk'><li><b>당일</b> 반장 세 숫자 중 하나라도 이상 → 즉시 원래 계획</li>"
@@ -428,13 +362,8 @@ def stop_rules():
                     "<div class='small'>멈춤 규칙은 손실을 막을 뿐 절감을 지켜 주지는 않습니다.</div>", unsafe_allow_html=True)
 
 
-def step4():
-    head("4 / 4 · 다음 날 08:30 · 자동", "어제 운전표가 피크를 낮췄나?",
-         "다음 날 아침 실측 파일이 들어오면 자동으로 채점합니다. 사람이 누를 것은 없습니다.")
-    if src() == SRC_U:
-        step4_user(); stop_rules(); return
-    a_notice(full=False)
-    day, m = day_and_mode()
+def yesterday(day, m):
+    """어제 채점 — 현행 ④ 모드 A 그대로(다음 날 아침 실측 파일이 들어오면 자동 채점, 사람 클릭 없음)."""
     if m == O.MODE_WIN:
         G6.autoscore_card(st, day, mcard, mtag)
     d = O.daily_rows(m)
@@ -448,13 +377,12 @@ def step4():
         st.dataframe(pd.DataFrame({"날짜": d.날짜.dt.strftime("%m/%d") + "(" + d.요일 + ")", "기존 kW": d.기존.round(1), "운전표 kW": d.운전표.round(1),
                                    "결과": d.판정}), hide_index=True, width="stretch")
         st.markdown("<div class='small'>주말 저부하일의 상승은 월 최대·요금에 영향이 없다.</div>", unsafe_allow_html=True)
-    stop_rules()
 
 
 def step4_user():
     gen = st.session_state.get("gen_b")
     if gen is None:
-        st.info("먼저 ② 에서 우리 공장 운전표를 만드십시오."); next_btn(STEPS[1], "② 운전표로 가기"); return
+        return
     sc = None
     if gen["realized"] is not None:
         sc = {"measured": gen["measured"], "realized": gen["realized"]}
@@ -480,6 +408,84 @@ def step4_user():
         day_chart(gen["index"], y, o, names=("실측", "운전표 적용"))
 
 
-{STEPS[0]: step1, STEPS[1]: step2, STEPS[2]: step3, STEPS[3]: step4}[step]()
+# ===================================================================== 한 페이지(위 → 아래)
+st.markdown("<div class='brand'>피크 운전표</div><div class='lede'>생산량은 그대로 두고, 전기 기본요금을 정하는 피크 15분만 낮추도록 "
+            "작업 시각을 옮기는 하루 운전표입니다.</div>", unsafe_allow_html=True)
+st.markdown("<span class='note'>예시 공장 A사 · 2021년 저장 데이터로 다시 계산</span>", unsafe_allow_html=True)
+day, m = day_and_mode()
+
+# [A] 운전표 — 열리면 바로 만든다(버튼 없음). 자동 입력이 "만들지 않는다"고 말한 상태면 건너뛴다.
+head("매일 전날 18:00 · 에너지 담당", "내일 어떤 작업을 몇 시로 옮길까?",
+     "전날 18시까지의 15분 전력으로 내일 운전표를 만듭니다. 사람이 있는 시간 안에서만 옮깁니다.")
+st.session_state["m_ingest_bad"] = False
+try:
+    G6.ingest_card(st, day, mcard, mtag)
+except Exception as e:  # noqa: BLE001 — 열 매핑 실패 등 — 계산 함수는 그대로, 화면만 다음 행동을 말한다
+    st.session_state["m_ingest_bad"] = True
+    tone, text, _ = INGEST_SAY["예외"]
+    say_box(tone, text, html.escape((str(e).splitlines() or [type(e).__name__])[0], quote=False))
+gen = st.session_state.get("gen")
+gen = gen if gen is not None and gen["day"] == day else None
+if st.session_state["m_ingest_bad"]:
+    gen = None
+elif gen is None:
+    with st.spinner("운전표 계산 중 — 몇 초"):
+        gen = O.regenerate(day)
+    st.session_state["gen"] = gen
+    O.save_last_gen(gen)
+if gen is not None:
+    y, o = gen["measured"], gen["plans"][m]
+    hero(f"{fday(day)} 하루 최대 전력", f"{y.max():.0f} → {kw1(o.max())}<span class=u> kW</span>",
+         f"운전표대로 옮겼을 때 {kw1(o.max() - y.max())} kW · 실제 그날 전력으로 사후 평가")
+    st.markdown("**옮길 작업** — 남색 줄은 부하 줄임, 주황 줄은 그 부하를 배치하는 시간", unsafe_allow_html=True)
+    move_list(O.move_table(gen["index"], O.base_of(gen), o))
+
+    # [B] 반장 확인 — 접지 않는다
+    head("매일 18:10 · 교대 반장", "못 옮기는 작업이 있나?", "체크하면 피크를 바로 다시 계산합니다.")
+    foreman(gen, m, O.SITE_ASA, (7, 20), "기존")
+
+# [C] 접힘 3개
+with st.expander("어제 채점 — 다음 날 08:30, 자동"):
+    yesterday(day, m)
+if m == O.MODE_WIN:
+    with st.expander("이번 달 누적 — 월말 판단"):
+        G6.month_card(day)                                   # 노트북 ④와 같은 함수·같은 문장
+stop_rules()
+
+# [D] 이 계산을 믿어도 되나
+with st.expander("이 계산을 믿어도 되나"):
+    fp = O.code_fingerprint()
+    n = COUNT.read_text(encoding="utf-8").strip() if COUNT.exists() else ""
+    pairs = []
+    if gen is not None:
+        cmp = gen["compare"][m]
+        pairs += [("저장해 둔 운전표와 대조", "일치" if cmp["ok"] else "불일치"),
+                  ("15분 구간별 최대 차이", f"{cmp['maxdiff']:.3f} kW"),
+                  ("계산 시간", f"{gen['total_sec']:.1f}초")]
+    pairs.append(("엔진 지문", "사전등록 일치 ✓" if all(fp["match"].values()) and fp["prereg_ok"] else "<span class='bad'>불일치</span>"))
+    if n:
+        pairs.append(("자동 시험", f"{n}건 통과"))
+    rows(pairs)
+    st.markdown("<div class='small'>계산은 오프라인 · 언어 모델 없음 · 숫자는 저장 파일에서 읽거나 같은 계산으로 다시 만든 값</div>", unsafe_allow_html=True)
+    with st.expander("날짜·조건 바꾸기"):
+        days = list(O.TEST_DAYS)
+        st.selectbox("날짜(2021-09 테스트 기간)", days, key="m_day", index=days.index(pd.Timestamp(O.DEMO_DAY)), format_func=fday)
+        st.radio("조건", CONDS, key="m_cond", format_func=J9.say_app)
+
+# [E] 더 보기
+st.divider()
+st.markdown("**더 보기**")
+with st.expander("우리 공장에 맞을까 — 고지서 다섯 숫자로 점검(도입 전 한 번)"):
+    step1()
+with st.expander("우리 공장 15분 전력으로 운전표 만들기(자사 데이터)"):
+    a_notice()
+    step2_user()
+    gen_b = st.session_state.get("gen_b")
+    if gen_b is not None:
+        st.markdown("**반장 확인**")
+        foreman(gen_b, O.MODE_WIN, O.SITE_USER, (gen_b["_form"]["win_lo"], gen_b["_form"]["win_hi"]), "운전표 없음 예상")
+        st.markdown("**다음 날 채점**")
+        step4_user()
+
 st.markdown("<div class='small' style='margin-top:28px'>화면의 숫자는 제출 산출물과 저장 파일에서 읽거나 같은 계산으로 다시 만든 값입니다. "
             "PC에서 전체 화면(KPI·진단 포함)은 주소에 <b>v=full</b>을 붙입니다.</div>", unsafe_allow_html=True)
