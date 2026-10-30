@@ -8,6 +8,7 @@
 # 실행: ..\_sched\run_demo.ps1  (로컬만: streamlit run viewer_ops.py --server.port 8601, 주소 끝에 ?k=<코드>)
 import hashlib
 import hmac
+import importlib
 import os
 import pathlib
 import time
@@ -20,6 +21,8 @@ import streamlit.components.v1 as components
 import ops_service as O
 import ops_g6_view as G6           # G6 카드 3개(자동 입력·자동 채점·월 요약) — 실행 사본에만
 import ops_j9_view as J9           # J9 0단계 화면(입력 5칸 + 붙여넣기 → 출력 4개 + 판정·다음 행동 카드) — J9 사본에만
+if not hasattr(J9, "cond_say"):   # 재배포가 프로세스를 다시 띄우지 않으면 예전 ops_j9_view 가 메모리에 남는다(10/30 Cloud·노트북 둘 다 겪음)
+    J9 = importlib.reload(J9)
 J9.patch_display(O)                # 교열: 반장 종이 표시 문구만 풀어 씀(동결 파일 수정 0)
 
 SHOW_MODE_B = False             # 킬 규칙(PRD §0-5): 10/28 12:00까지 모드 B 가 S11 을 못 넘으면 False — 코드는 남긴다

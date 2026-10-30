@@ -9,6 +9,7 @@
 import hashlib
 import hmac
 import html
+import importlib
 import os
 import pathlib
 
@@ -21,6 +22,8 @@ import ops_g6_view as G6
 import ops_j9_view as J9
 import ops_service as O
 
+if not hasattr(J9, "MOVE_SAY"):   # 재배포가 프로세스를 다시 띄우지 않으면 예전 ops_j9_view 가 메모리에 남는다(10/30 Cloud·노트북 둘 다 겪음)
+    J9 = importlib.reload(J9)
 J9.patch_display(O)
 st.set_page_config(page_title="전력 피크 관리 운전표", layout="centered", initial_sidebar_state="collapsed")
 
