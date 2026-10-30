@@ -44,7 +44,10 @@ def key_ok(want):
         return False
     if st.session_state.get("m_auth"):
         return True
-    for got in (st.query_params.get("k", ""), st.session_state.get("m_code", "")):
+    typed = str(st.session_state.get("m_code", "")).strip()
+    if "k=" in typed:                                        # "?k=코드"·"k=코드"·QR 주소 전체를 붙여 넣어도 코드만 쓴다
+        typed = typed.rsplit("k=", 1)[1].split("&")[0].split("#")[0].strip()
+    for got in (st.query_params.get("k", ""), typed):
         if got and hmac.compare_digest(str(got).strip().encode("utf-8"), want.encode("utf-8")):
             st.session_state["m_auth"] = True
             return True
@@ -55,7 +58,7 @@ _want = want_key()
 if not key_ok(_want):
     st.markdown("시연 전용 화면입니다.")
     if _want:                                                # QR 없이 노트북에서 열 때 — 코드를 넣으면 같은 화면이 열린다
-        st.text_input("접속 코드", type="password", key="m_code", placeholder="발표 자료의 접속 코드를 넣고 Enter")
+        st.text_input("접속 코드", type="password", key="m_code", placeholder="접속 코드(또는 QR 주소 전체)를 붙여 넣고 Enter")
         if st.session_state.get("m_code"):
             st.error("접속 코드가 맞지 않습니다.")
     st.stop()
