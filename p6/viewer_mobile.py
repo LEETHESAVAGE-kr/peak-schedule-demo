@@ -30,17 +30,34 @@ CONDS = O.CONDS
 COUNT = pathlib.Path(__file__).parent / "tests" / "_count.txt"
 
 
-def key_ok():
-    """viewer_ops 와 같은 잠금 — ?k= 가 접속 코드 파일과 같아야 연다. 파일이 없으면 닫힌다."""
+def want_key():
     try:
-        want = KEY_FILE.read_text(encoding="utf-8").strip()
+        return KEY_FILE.read_text(encoding="utf-8").strip()
     except OSError:
+        return ""
+
+
+def key_ok(want):
+    """viewer_ops 와 같은 잠금 — ?k= 또는 잠금 화면 입력칸의 코드가 접속 코드 파일과 같아야 연다. 파일이 없으면 닫힌다.
+    한 번 맞으면 그 세션은 열린 채로 둔다(입력칸이 사라져도 다시 잠기지 않게 위젯 밖 키에 적는다)."""
+    if not want:
         return False
-    return bool(want) and hmac.compare_digest(str(st.query_params.get("k", "")), want)
+    if st.session_state.get("m_auth"):
+        return True
+    for got in (st.query_params.get("k", ""), st.session_state.get("m_code", "")):
+        if got and hmac.compare_digest(str(got).strip().encode("utf-8"), want.encode("utf-8")):
+            st.session_state["m_auth"] = True
+            return True
+    return False
 
 
-if not key_ok():
+_want = want_key()
+if not key_ok(_want):
     st.markdown("시연 전용 화면입니다.")
+    if _want:                                                # QR 없이 노트북에서 열 때 — 코드를 넣으면 같은 화면이 열린다
+        st.text_input("접속 코드", type="password", key="m_code", placeholder="발표 자료의 접속 코드를 넣고 Enter")
+        if st.session_state.get("m_code"):
+            st.error("접속 코드가 맞지 않습니다.")
     st.stop()
 
 st.markdown("""<style>
